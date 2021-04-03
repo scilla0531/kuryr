@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    k8s.v1.cni.cncf.io/networks: kube-system/kuryr
+
+    subnetId: 4f612cfa-3728-4f3b-a4cf-eb74ef091ac3
+    routerId: ae889c0a-6a17-4042-b92e-5bab3ac25416
+    projectId: project-id-tenant
+    sgId: ""
+  labels:
+    openstack.io: kuryr
+    openstack.io/is-tenant: "true"
+  name: ljx
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  namespace: ljx
+  name: nginx-specify-fixedip
+  labels:
+    app: nginx-specify-fixedip
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-specify-fixedip
+  template:
+    metadata:
+      labels:
+        app: nginx-specify-fixedip
+      annotations:
+        k8s.v1.cni.cncf.io/networks: kube-system/kuryr
+
+        subnetId: f4910791-c6c7-427d-8096-dba51e03e608
+        sgId: f461a311-0901-4253-98e1-002401b7e8dd
+        fixedIP: 192.168.2.210
+        #fixedIP: ""
+    spec:
+      containers:
+        - image: nginx:latest
+          imagePullPolicy: IfNotPresent
+          name: nginx-specify-fixedip
+          ports:
+            - containerPort: 8080
+      dnsPolicy: ClusterFirst
+      #nodeName: xxx
+      restartPolicy: Always
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  namespace: ljx
+  name: nginx-specify-sgid-subnetid
+  labels:
+    app: nginx-specify-sgid-subnetid
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-specify-sgid-subnetid
+  template:
+    metadata:
+      labels:
+        app: nginx-specify-sgid-subnetid
+      annotations:
+        k8s.v1.cni.cncf.io/networks: kube-system/kuryr
+
+        subnetId: f4910791-c6c7-427d-8096-dba51e03e608
+        sgId: f461a311-0901-4253-98e1-002401b7e8dd
+    spec:
+      containers:
+        - image: nginx:latest
+          imagePullPolicy: IfNotPresent
+          name: nginx-specify-sgid-subnetid
+          ports:
+            - containerPort: 8080
+      dnsPolicy: ClusterFirst
+      #nodeName: xxx
+      restartPolicy: Always
+---
+
+
+
+
+----不需要手动创建
+apiVersion: openstack.org/v1
+kind: KuryrPort
+metadata:
+  labels:
+    kuryr.openstack.org/nodeName: kuryr-node
+  name: nginx
+  namespace: ljx
+spec:
+  podNodeName: kuryr-node
+  podUid: 45e679f4-7d8a-11eb-be7d-0800273bd978
+status:
+  projectId: 8f0fd94c3840475298a8f2ecde92a21c
+  vifs: []

@@ -4,12 +4,11 @@ package openflow
 import (
 	"bytes"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/sirupsen/logrus"
-)
+	)
 
 type klogFormatter struct{}
 

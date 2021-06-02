@@ -1,5 +1,5 @@
 #!/bin/bash
-conf_dir=/home/ljx
+conf_dir=/home/ljx/conf
 
 initKubeConfig(){
   PROJECT=admin
@@ -14,16 +14,16 @@ initKubeConfig(){
   echo ${OPENSTACK_AUTH_URL}
   APISERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
   TOKEN=$(kubectl get secrets -n kube-system -o jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='kuryr-controller')].data.token}"|base64 --decode)
-  kubectl config --kubeconfig=${conf_dir}/kuryr-controller.kubeconfig set-cluster kubernetes --server=$APISERVER --insecure-skip-tls-verify
-  kubectl config --kubeconfig=${conf_dir}/kuryr-controller.kubeconfig set-credentials kuryr-controller --token=$TOKEN
-  kubectl config --kubeconfig=${conf_dir}/kuryr-controller.kubeconfig set-context kuryr-controller@kubernetes --cluster=kubernetes --user=kuryr-controller
-  kubectl config --kubeconfig=${conf_dir}/kuryr-controller.kubeconfig use-context kuryr-controller@kubernetes
+  kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig set-cluster kubernetes --server=$APISERVER --insecure-skip-tls-verify
+  kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig set-credentials kuryr-controller --token=$TOKEN
+  kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig set-context kuryr-controller@kubernetes --cluster=kubernetes --user=kuryr-controller
+  kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig use-context kuryr-controller@kubernetes
 
 
 cat >${conf_dir}/kuryr-controller.conf <<EOF
 # Required Configuration
 clientConnection:
-    kubeconfig: ${conf_dir}/kuryr-controller.kubeconfig
+    kubeconfig: ${conf_dir}/kuryr.kubeconfig
 openstack:
     authUrl : ${OPENSTACK_AUTH_URL}
     authType : password
@@ -43,6 +43,21 @@ openstack:
     ovsBridge : br-int
 EOF
 
+
+cat >${conf_dir}/kuryr-agent.conf <<EOF
+# Required Configuration
+clientConnection:
+    kubeconfig: ${conf_dir}/kuryr.kubeconfig
+
+bindAddress: 0.0.0.0:5036
+ovsBridge : br-int
+healthzBindAddress :
+
+# linkIface : eth0
+# dockerMode = true
+# netnsProcDir = /host_proc
+EOF
+
 # 再生成kuryr-agent.conf
 
 }
@@ -58,8 +73,11 @@ if [ "$1" = "init" ];then
   fi
 elif [ "$1" = "agent" ];then
   echo "run kuryr-agent!"
-  go build -o ./kuryr-controller ./cmd/kuryr-controller
-  ./kuryr-controller --config ${conf_dir}kuryr-agent.conf
+  go build -o ${conf_dir}/kuryr-agent ./cmd/kuryr-agent
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+  ${conf_dir}/kuryr-agent --config ${conf_dir}/kuryr-agent.conf
 else
   echo "run kuryr-controller!"
   go build -o ${conf_dir}/kuryr-controller ./cmd/kuryr-controller

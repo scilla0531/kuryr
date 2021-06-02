@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
 	"github.com/spf13/pflag"
 	"k8s.io/api/apps/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -357,30 +358,76 @@ func learnInformer(config componentbaseconfig.ClientConnectionConfiguration)  {
 
 }
 
-func userIndexFunc(obj interface{}) ([]string, error){
-	pod := obj.(*corev1.Pod)
-	klog.Infof("users: %v\n", pod.Annotations["users"])
-	return strings.Split(pod.Annotations["users"], ","), nil
+/*第二层key*/
+func OsNetworkIndexFunc(obj interface{}) ([]string, error){
+	net := obj.(*networks.Network)
+	klog.Infof("OsNetworkIndexFunc > TenantID: %v\n", net.TenantID)
+	return []string{ net.TenantID}, nil
 }
+
+/*第三层key*/
+func OsNetworkKeyFunc(obj interface{}) (string, error) {
+	if key, ok := obj.(string); ok {
+		return string(key), nil
+	}
+
+	klog.Infof("OsNetworkKeyFunc > ID: %v\n", obj.(*networks.Network).ID)
+	return obj.(*networks.Network).ID, nil
+}
+
+func SplitUserKeyFunc(key string) (kind, name string, err error) {
+	parts := strings.Split(key, "/")
+	switch len(parts) {
+	case 1:
+		// name only, no namespace
+		return "", parts[0], nil
+	case 2:
+		// namespace and name
+		return parts[0], parts[1], nil
+	}
+
+	return "", "",fmt.Errorf("unexpected key format: %q", key)
+}
+
+// 再定义一些network数据
 
 func LearnIndexer(){
-	index := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"byUser": userIndexFunc})
+	if true {
+		IndexName := "OsNetwork"
+		tenantId := "tenantid-xxx"
+		netId1 := "networkid-111"
+		netId2 := "networkid-222"
 
-	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "one", Annotations: map[string]string{"users": "ernie,bert"}}}
-	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "two", Annotations: map[string]string{"users": "bert,oscar,ernie"}}}
+		osIndex := cache.NewIndexer(OsNetworkKeyFunc/*用于计算资源对象的key(第三层key)*/, cache.Indexers{IndexName/*索引器的名称（第一层key）*/: OsNetworkIndexFunc/*第二层key*/})
+		osIndex.Add(&networks.Network{ID: netId1, TenantID: tenantId})
+		osIndex.Add(&networks.Network{ID: netId2, TenantID: tenantId})
+		klog.Infof("#####ListKeys: %+v \n\n", osIndex.ListKeys()) // 罗列的是所有items的key
 
-	index.Add(pod1)
-	index.Add(pod2)
+		nets, err := osIndex.ByIndex(IndexName, tenantId)
+		if err != nil {
+			klog.Errorf("Error: %s", err)
+		}
+		for _, net := range nets {
+			klog.Infof("get OsNetwork : %v\n", net.(*networks.Network))
+		}
 
-	erniePods, err := index.ByIndex("byUser", "ernie")
-	if err != nil {
-		klog.Errorf("Error: %s", err)
+		nets, err = osIndex.ByIndex(IndexName, netId1)
+		if err != nil {
+			klog.Errorf("Error: %s", err)
+		}
+		for _, net := range nets {
+			klog.Infof("get OsNetwork : %v\n", net.(*networks.Network))
+		}
 	}
-	for _, erniePod := range erniePods {
-		klog.Infof("erniePod: %s\n", erniePod.(*corev1.Pod).Name)
-	}
+
+	/*
+	缓存 neutron 数据
+	Networks
+	Subnets
+	Ports
+
+	*/
 }
-
 
 func LearnClientGo(config *ControllerConfig) {
 	learnRestClient(config.ClientConnection)

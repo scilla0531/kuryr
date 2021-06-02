@@ -3,6 +3,7 @@ package main
 import (
 	"k8s.io/component-base/logs"
 	"os"
+	"projectkuryr/kuryr/cmd/kuryr-agent/app"
 )
 
 /*
@@ -20,7 +21,7 @@ func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
 
-	command := newAgentCommand()
+	command := app.NewAgentCommand()
 
 	if err := command.Execute(); err != nil {
 		os.Exit(1)

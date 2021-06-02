@@ -184,12 +184,6 @@ func (o *Options) validate(args []string) (int, error) {
 	return 0, nil
 }
 
-func (o *Options) Run() error {
-	//LearnClientGo(o.config)
-
-	return nil
-}
-
 func NewControllerCommand() *cobra.Command {
 	opts := NewOptions()
 

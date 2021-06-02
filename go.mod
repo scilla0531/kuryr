@@ -7,6 +7,7 @@ require (
 	github.com/TomCodeLV/OVSDB-golang-lib v0.0.0-20200116135253-9bbdfadcd881
 	github.com/blang/semver v3.5.0+incompatible
 	github.com/containernetworking/cni v0.8.0
+	github.com/containernetworking/plugins v0.8.7
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/google/go-cmp v0.4.0 // indirect
 	github.com/gophercloud/gophercloud v0.17.0
@@ -27,22 +28,31 @@ require (
 	k8s.io/api v0.18.4
 	k8s.io/apimachinery v0.18.4
 	k8s.io/apiserver v0.18.4
-    k8s.io/client-go v0.18.4
+	k8s.io/client-go v0.18.4
 	k8s.io/code-generator v0.18.4
 	k8s.io/component-base v0.18.4
 	k8s.io/klog v1.0.0
 	k8s.io/kube-aggregator v0.18.4
 	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
 	github.com/contiv/libOpenflow v0.0.0-20210312221048-1d504242120d
+	github.com/gogo/protobuf v1.3.1
+	github.com/golang/protobuf v1.3.2
+	github.com/golang/mock v1.4.4
+	github.com/sirupsen/logrus v1.4.2
+    github.com/contiv/libOpenflow v0.0.0-20210312221048-1d504242120d
+    github.com/contiv/ofnet v0.0.0-00010101000000-000000000000
+
 )
 
+// fake.NewSimpleClientset is quite slow when it's initialized with massive objects due to
+// https://github.com/kubernetes/kubernetes/issues/89574. It takes more than tens of minutes to
+// init a fake client with 200k objects, which makes it hard to run the NetworkPolicy scale test.
+// There is an optimization https://github.com/kubernetes/kubernetes/pull/89575 but will only be
+// available from 1.19.0 and later releases. Use this commit before Kuryr bumps up its K8s
+// dependency version.
 replace (
-    // fake.NewSimpleClientset is quite slow when it's initialized with massive objects due to
-    // https://github.com/kubernetes/kubernetes/issues/89574. It takes more than tens of minutes to
-    // init a fake client with 200k objects, which makes it hard to run the NetworkPolicy scale test.
-    // There is an optimization https://github.com/kubernetes/kubernetes/pull/89575 but will only be
-    // available from 1.19.0 and later releases. Use this commit before Kuryr bumps up its K8s
-    // dependency version.
-    k8s.io/client-go => github.com/tnqn/client-go v0.18.4-1
+	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.1
+	k8s.io/client-go => github.com/tnqn/client-go v0.18.4-1
+	github.com/contiv/ofnet => github.com/wenyingd/ofnet v0.0.0-20210318032909-171b6795a2da
 
 )

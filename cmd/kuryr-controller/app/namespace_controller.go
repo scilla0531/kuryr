@@ -238,7 +238,7 @@ func (c *NsController) Run(threadiness int, stopCh <-chan struct{}) {
 	defer c.podQueue.ShutDown()
 
 	// Start the informer factories to begin populating the informer caches
-	klog.Info("Starting Namespaces&Pod controller")
+	klog.Info("Starting Namespaces & Pod controller")
 
 	// Wait for the caches to be synced before starting workers
 	klog.Info("Waiting for informer caches to sync")
@@ -356,7 +356,7 @@ func (c *NsController) syncNamespace(key string) (err error) {
 	if err = c.knsSyncFromNs(ns); err != nil{
 		klog.Errorf("Failed synced KuryrNetwork(%s/%s)\n", ns.Name, ns.Name)
 	}else{
-		c.recorder.Event(ns, corev1.EventTypeNormal, SuccessSynced, MessageResourceKnsSynced)
+		//c.recorder.Event(ns, corev1.EventTypeNormal, SuccessSynced, MessageResourceKnsSynced)
 		klog.Infof("Successfully synced KuryrNetwork(%s/%s)\n", ns.Name, ns.Name)
 	}
 

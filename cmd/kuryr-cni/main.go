@@ -9,6 +9,7 @@ import (
 	cni "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	cniversion "github.com/containernetworking/cni/pkg/version"
+	cniv1alpha1 "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
 	"projectkuryr/kuryr/pkg/version"
 
 	"github.com/pkg/errors"
@@ -28,25 +29,14 @@ const (
 	delPath = "delNetwork"
 )
 
-
-type KuryrDaemonData struct {
-	IfName      string      `json:"CNI_IFNAME"`
-	Netns       string      `json:"CNI_NETNS"`
-	Path        string      `json:"CNI_PATH"`
-	Command     string      `json:"CNI_COMMAND"`
-	ContainerID string      `json:"CNI_CONTAINERID"`
-	Args        string      `json:"CNI_ARGS"`
-	KuryrConf   interface{} `json:"config_kuryr"`
-}
-
-func transformData(args *skel.CmdArgs, command string) (KuryrDaemonData, error) {
+func transformData(args *skel.CmdArgs, command string) (cniv1alpha1.KuryrDaemonData, error) {
 	var conf interface{}
 	err := json.Unmarshal(args.StdinData, &conf)
 	if err != nil {
-		return KuryrDaemonData{}, err
+		return cniv1alpha1.KuryrDaemonData{}, err
 	}
 
-	return KuryrDaemonData{
+	return cniv1alpha1.KuryrDaemonData{
 		IfName:      args.IfName,
 		Netns:       args.Netns,
 		Path:        args.Path,
@@ -57,7 +47,7 @@ func transformData(args *skel.CmdArgs, command string) (KuryrDaemonData, error) 
 	}, nil
 }
 
-func makeDaemonRequest(data KuryrDaemonData, expectedCode int) ([]byte, error) {
+func makeDaemonRequest(data cniv1alpha1.KuryrDaemonData, expectedCode int) ([]byte, error) {
 	log.Printf("Calling kuryr-daemon with %s request (CNI_ARGS=%s, CNI_NETNS=%s).", data.Command, data.Args, data.Netns)
 
 	b, err := json.Marshal(data)

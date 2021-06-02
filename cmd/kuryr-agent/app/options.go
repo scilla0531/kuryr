@@ -1,14 +1,16 @@
-package main
+package app
 
 import (
 	"fmt"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"k8s.io/klog"
-	"net"
 	"projectkuryr/kuryr/pkg/agent/config"
 	"projectkuryr/kuryr/pkg/ovs/ovsconfig"
+	"projectkuryr/kuryr/pkg/cni"
+	"projectkuryr/kuryr/pkg/version"
 	"time"
 )
 
@@ -28,7 +30,6 @@ const (
 	defaultAgentBindAddress		   = ":5036"
 	defaultAgentMetricsBindAddress = ":8036"
 	defaultAgentHealthzBindAddress = ":8037"
-
 )
 
 type Options struct {
@@ -37,12 +38,14 @@ type Options struct {
 
 	// The configuration object
 	config         *AgentConfig
-	proxyServer    proxyRun
-	CleanupAndExit bool
 	// errCh is the channel that errors will be sent
 	errCh chan error
+
 	// master is used to override the kubeconfig's URL to the apiserver.
-	master string
+	//master string
+
+	//proxyServer    proxyRun
+	CleanupAndExit bool
 }
 
 func newOptions() *Options {
@@ -60,11 +63,6 @@ func (o *Options) loadConfigFromFile() error {
 		return err
 	}
 
-	//err = yaml.Unmarshal(data, &o.config)
-	//fmt.Printf("######## get struct from []byte: \n%+v\n########\n\n", *o.config)
-	//fmt.Printf("######## get ClientConnection from []byte: \n%+v\n########\n\n", o.config.ClientConnection)
-	//return err
-
 	//return yaml.UnmarshalStrict(data, &o.config)
 	return yaml.Unmarshal(data, &o.config)
 }
@@ -81,7 +79,7 @@ func (o *Options) setDefaults() {
 	}
 
 	if o.config.CNISocket == "" {
-		o.config.CNISocket = KuryrCNISocketAddr
+		o.config.CNISocket = cni.KuryrCNISocketAddr
 	}
 	if o.config.OVSBridge == "" {
 		o.config.OVSBridge = defaultOVSBridge
@@ -104,9 +102,9 @@ func (o *Options) setDefaults() {
 	if o.config.HostProcPathPrefix == "" {
 		o.config.HostProcPathPrefix = defaultHostProcPathPrefix
 	}
-	if o.config.ServiceCIDR == "" {
-		o.config.ServiceCIDR = defaultServiceCIDR
-	}
+	//if o.config.ServiceCIDR == "" {
+	//	o.config.ServiceCIDR = defaultServiceCIDR
+	//}
 	if o.config.BindAddress == "" {
 		o.config.BindAddress = defaultAgentBindAddress
 	}
@@ -137,53 +135,36 @@ func (o *Options) validate(args []string) error {
 		return fmt.Errorf("no positional arguments are supported")
 	}
 
-	_, _, err := net.ParseCIDR(o.config.ServiceCIDR)
-	if err != nil {
-		return fmt.Errorf("Service CIDR %s is invalid", o.config.ServiceCIDR)
-	}
-	if o.config.ServiceCIDRv6 != "" {
-		_, _, err := net.ParseCIDR(o.config.ServiceCIDRv6)
-		if err != nil {
-			return fmt.Errorf("Service CIDR v6 %s is invalid", o.config.ServiceCIDRv6)
-		}
-	}
-
 	// 检查 o.config.HealthzBindAddress 和 o.config.MetricsBindAddress 是否符合ipPort
 
 	return nil
 }
 
-// runLoop will watch on the update change of the proxy server's configuration file.
-// Return an error when updated
-func (o *Options) runLoop() error {
-	// run the proxy in goroutine
-	go func() {
-		err := o.proxyServer.Run()
-		o.errCh <- err
-	}()
+func NewAgentCommand() *cobra.Command {
+	opts := newOptions()
 
-	for {
-		err := <-o.errCh
-		if err != nil {
-			return err
-		}
-	}
-}
+	cmd := &cobra.Command{
+		Use:  "kuryr-agent",
+		Long: "The kuryr agent runs on each node.",
+		Run: func(cmd *cobra.Command, args []string) {
+			klog.Infoln("newAgentCommand Run")
 
-//Run runs the specified ProxyServer.
-func (o *Options) Run() error {
-	defer close(o.errCh)
-
-	proxyServer, err := NewProxyServer(o)
-	if err != nil {
-		return err
+			if err := opts.complete(args); err != nil {
+				klog.Fatalf("Failed to complete: %v", err)
+			}
+			if err := opts.validate(args); err != nil {
+				klog.Fatalf("Failed to validate: %v", err)
+			}
+			if err := run(opts); err != nil {
+				klog.Fatalf("Error running agent: %v", err)
+			}
+		},
+		Version: version.GetFullVersionWithRuntimeInfo(),
 	}
 
-	if o.CleanupAndExit {
-		klog.Infoln()
-		return proxyServer.CleanupAndExit()
-	}
-
-	o.proxyServer = proxyServer
-	return o.runLoop()
+	flags := cmd.Flags()
+	opts.addFlags(flags)
+	//// Install log flags
+	//flags.AddGoFlagSet(flag.CommandLine)
+	return cmd
 }

@@ -160,7 +160,6 @@ func run(o *Options) error {
 	knsInformer := crdInformerFactory.Openstack().V1alpha1().KuryrNetworks()
 	kpInformer := crdInformerFactory.Openstack().V1alpha1().KuryrPorts()
 
-
 	// Add kuryr-controller types to the default Kubernetes Scheme so Events can be logged for sample-controller types.
 	utilruntime.Must(kuryrscheme.AddToScheme(scheme.Scheme)) //???????????????????????????????????????
 
@@ -178,10 +177,6 @@ func run(o *Options) error {
 	knsStore := struct{}{}
 	_ = aggregatorClient
 	_ = knsStore
-
-
-
-
 
 	nsController := NewNsController(o.config,
 		client,

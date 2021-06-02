@@ -1,12 +1,13 @@
-package main
+package app
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	componentbaseconfig "k8s.io/component-base/config"
 )
 
 type AgentConfig struct {
-	metav1.TypeMeta `json:",inline"`
+	// clientConnection specifies the kubeconfig file and client connection settings for the agent
+	// to communicate with the apiserver.
+	ClientConnection componentbaseconfig.ClientConnectionConfiguration `yaml:"clientConnection"`
 
 	// bindAddress is the IP address for the proxy server to serve on,
 	// defaulting to 0.0.0.0:5036
@@ -22,9 +23,6 @@ type AgentConfig struct {
 	BindAddressHardFail bool
 
 	CNISocket string `yaml:"cniSocket,omitempty"`
-	// clientConnection specifies the kubeconfig file and client connection settings for the agent
-	// to communicate with the apiserver.
-	ClientConnection componentbaseconfig.ClientConnectionConfiguration `yaml:"clientConnection"`
 
 	// Name of the OpenVSwitch bridge kuryr-agent will create and use.
 	// Make sure it doesn't conflict with your existing OpenVSwitch bridges.

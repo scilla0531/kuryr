@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2017 The Kubernetes Authors.
+# Copyright 2019 Antrea Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,19 +18,19 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-SCRIPT_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-CODEGEN_PKG=${CODEGEN_PKG:-$(cd "${SCRIPT_ROOT}"; ls -d -1 ./vendor/k8s.io/code-generator 2>/dev/null || echo ../code-generator)}
+#KURYR_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
+#echo "KURYR_ROOT:$KURYR_ROOT"
 
-# generate the code with:
-# Usage:  <generators> <output-package> <apis-package> <groups-versions> --output-base  ...
-# --output-base    because this script should also be able to run inside the vendor dir of
-#                  k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
-#                  instead of the $GOPATH directly. For normal projects this can be dropped.
-bash "${CODEGEN_PKG}"/generate-groups.sh "deepcopy,client,informer,lister" \
-  projectkuryr/kuryr/pkg/client projectkuryr/kuryr/pkg/apis \
-  openstack:v1alpha1 \
-  --output-base "$(dirname "${BASH_SOURCE[0]}")/../../.." \
-  --go-header-file "${SCRIPT_ROOT}"/hack/boilerplate.go.txt
+KURYR_ROOT=${GOPATH}/src/projectkuryr/kuryr
+CONTAINER_WORKDIR=/go/src/projectkuryr/kuryr
+IMAGE_NAME=registry-jinan-lab.inspurcloud.cn/library/cke/kuryr/codegen:kubernetes-1.18.4
 
-# To use your own boilerplate text append:
-#   --go-header-file "${SCRIPT_ROOT}"/hack/custom-boilerplate.go.txt
+function docker_run() {
+  docker pull ${IMAGE_NAME}
+  docker run --rm \
+		-w ${CONTAINER_WORKDIR} \
+		-v ${KURYR_ROOT}:${CONTAINER_WORKDIR} \
+		"${IMAGE_NAME}" "$@"
+}
+
+docker_run hack/update-codegen-dockerized.sh

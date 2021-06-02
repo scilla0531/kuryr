@@ -43,10 +43,36 @@ customresourcedefinition.apiextensions.k8s.io/kuryrnetworks.openstack.org create
 
 # token 信息
 
+## grpc codegen
+```bash
+./hack/update-codegen.sh
+
+```
 
 
 
+### 模拟 kubelet invoke
+```bash
+K8S_POD_NAMESPACE=ljx
+K8S_POD_NAME=nginx-bc867d6d8-xfzsn
+pause_cid=1e6075ad46f2
 
+nspid=`docker inspect $pause_cid -f {{.State.Pid}}`
+CNI_CONTAINERID=`docker inspect $pause_cid -f {{.Id}}`
+K8S_POD_INFRA_CONTAINER_ID=$CNI_CONTAINERID
+
+
+echo ${CNI_CONTAINERID}
+echo ${nspid}
+echo ${K8S_POD_INFRA_CONTAINER_ID}
+echo ${pause_cid}
+
+cat /etc/cni/net.d/10-kuryr.conf | sudo CNI_COMMAND=ADD CNI_NETNS="/proc/${nspid}/ns/net" \
+CNI_PATH='/opt/cni/bin' \
+CNI_IFNAME=eth0 \
+CNI_CONTAINERID=${CNI_CONTAINERID} \
+CNI_ARGS="IgnoreUnknown=1;K8S_POD_NAMESPACE=${K8S_POD_NAMESPACE};K8S_POD_NAME=${K8S_POD_NAME};K8S_POD_INFRA_CONTAINER_ID=${CNI_CONTAINERID}"  /opt/cni/bin/kuryr-cni
+```
 
 
 

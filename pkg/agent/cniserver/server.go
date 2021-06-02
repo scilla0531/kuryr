@@ -192,6 +192,8 @@ func (s *CNIServer) reconcile() error {
 	klog.Infof("Reconciliation for CNI server")
 	// For performance reasons, use ResourceVersion="0" in the ListOptions to ensure the request is served from
 	// the watch cache in kube-apiserver.
+
+	return nil
 	pods, err := s.kubeClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		FieldSelector:   "spec.nodeName=" + s.nodeConfig.Name,
 		ResourceVersion: "0",
@@ -292,7 +294,7 @@ func New(
 		cniSocket:            cniSocket,
 		supportedCNIVersions: supportedCNIVersionSet,
 		serverVersion:        cni.KuryrCNIVersion,
-		crdClient: 			crdClient,
+		crdClient: 			  crdClient,
 		networkReadyCh:       networkReadyCh,
 		hostProcPathPrefix: hostProcPathPrefix,
 	}
@@ -304,19 +306,6 @@ func (s *CNIServer) Initialize(
 	ifaceStore interfacestore.InterfaceStore,
 	entityUpdates chan<- types.EntityReference,
 ) error {
-	var err error
-	s.podConfigurator, err = newPodConfigurator(
-		ovsBridgeClient,
-		ofClient,
-		s.nodeConfig.GatewayConfig.MAC,
-		ovsBridgeClient.GetOVSDatapathType(), ovsBridgeClient.IsHardwareOffloadEnabled(),
-		)
-	if err != nil {
-		return fmt.Errorf("error during initialize podConfigurator: %v", err)
-	}
-	if err := s.reconcile(); err != nil {
-		return fmt.Errorf("error during initial reconciliation for CNI server: %v", err)
-	}
 	return nil
 }
 

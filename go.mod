@@ -8,12 +8,18 @@ require (
 	github.com/blang/semver v3.5.0+incompatible
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
+	github.com/contiv/libOpenflow v0.0.0-20210312221048-1d504242120d
+	github.com/contiv/ofnet v0.0.0-00010101000000-000000000000
+	github.com/gogo/protobuf v1.3.1
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
+	github.com/golang/mock v1.4.4
+	github.com/golang/protobuf v1.3.2
 	github.com/google/go-cmp v0.4.0 // indirect
 	github.com/gophercloud/gophercloud v0.17.0
 	github.com/kr/text v0.2.0 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/pkg/errors v0.9.1
+	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1 // indirect
@@ -23,25 +29,18 @@ require (
 	golang.org/x/sys v0.0.0-20201201145000-ef89a241ccb3 // indirect
 	golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
+	google.golang.org/grpc v1.26.0
 	gopkg.in/check.v1 v1.0.0-20200902074654-038fdea0a05b // indirect
 	gopkg.in/yaml.v2 v2.3.0
 	k8s.io/api v0.18.4
 	k8s.io/apimachinery v0.18.4
 	k8s.io/apiserver v0.18.4
 	k8s.io/client-go v0.18.4
-	k8s.io/code-generator v0.18.4
+	k8s.io/code-generator v0.18.6-rc.0
 	k8s.io/component-base v0.18.4
 	k8s.io/klog v1.0.0
 	k8s.io/kube-aggregator v0.18.4
 	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
-	github.com/contiv/libOpenflow v0.0.0-20210312221048-1d504242120d
-	github.com/gogo/protobuf v1.3.1
-	github.com/golang/protobuf v1.3.2
-	github.com/golang/mock v1.4.4
-	github.com/sirupsen/logrus v1.4.2
-    github.com/contiv/libOpenflow v0.0.0-20210312221048-1d504242120d
-    github.com/contiv/ofnet v0.0.0-00010101000000-000000000000
-
 )
 
 // fake.NewSimpleClientset is quite slow when it's initialized with massive objects due to
@@ -51,8 +50,8 @@ require (
 // available from 1.19.0 and later releases. Use this commit before Kuryr bumps up its K8s
 // dependency version.
 replace (
+	github.com/contiv/ofnet => github.com/wenyingd/ofnet v0.0.0-20210318032909-171b6795a2da
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.1
 	k8s.io/client-go => github.com/tnqn/client-go v0.18.4-1
-	github.com/contiv/ofnet => github.com/wenyingd/ofnet v0.0.0-20210318032909-171b6795a2da
 
 )

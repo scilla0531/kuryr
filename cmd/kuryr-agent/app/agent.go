@@ -162,11 +162,6 @@ _= kpInformer
 		klog.Infof("ofport: %+v\n", ofport)
 	}
 
-
-
-
-
-
 	networkReadyCh := make(chan struct{})
 	cniServer := cniserver.New(
 		o.config.CNISocket,
@@ -174,17 +169,6 @@ _= kpInformer
 		crdClient,
 		networkReadyCh)
 
-	// Create an ifaceStore that caches network interfaces managed by this node.
-	ifaceStore := interfacestore.NewInterfaceStore()
-	// entityUpdates is a channel for receiving entity updates from CNIServer and
-	// notifying NetworkPolicyController to reconcile rules related to the
-	// updated entities.
-	entityUpdates := make(chan types.EntityReference, 100)
-
-	err = cniServer.Initialize(ovsBridgeClient, ofClient, ifaceStore, entityUpdates)
-	if err != nil {
-		return fmt.Errorf("error initializing CNI server: %v", err)
-	}
 
 	// set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
 	// cause the stopCh channel to be closed; if another signal is received before the program

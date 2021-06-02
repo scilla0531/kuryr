@@ -1,14 +1,8 @@
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 syntax = "proto3";
 
-import "github.com/gogo/protobuf/gogoproto";
+import "google/protobuf/any.proto";
 
-package github.com.kuryr.pkg.apis.cni.v1alpha1;
+package kuryrcni;
 
 option go_package = "v1alpha1";
 
@@ -47,8 +41,7 @@ enum ErrorCode {
 message Error {
     ErrorCode code = 1;
     string message = 2;
-    // repeated google.protobuf.Any details = 3;
-    repeated int32 details = 3;
+    repeated google.protobuf.Any details = 3;
 }
 
 message CniCmdResponse {

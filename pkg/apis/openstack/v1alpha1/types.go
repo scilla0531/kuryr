@@ -162,6 +162,8 @@ type Subnet struct {
 	//ID string `json:"id"`
 	Routes  []Route  `json:"routes"`
 	Ips     []IP     `json:"ips"`
+	// IP version, either `4' or `6'.
+	IPVersion int `json:"ip_version"`
 	Cidr    string   `json:"cidr"`
 	Gateway string   `json:"gateway"`
 	DNS     []string `json:"dns"`

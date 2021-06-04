@@ -5,7 +5,6 @@ const (
 	// the default port for the kuryr-agent APIServer.
 	KuryrAgentAPIPort = 10350
 
-	defaultAgentBindAddress		   = ":5036"
 	defaultAgentMetricsBindAddress = ":8036"
 	defaultAgentHealthzBindAddress = ":8037"
 

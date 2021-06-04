@@ -27,7 +27,6 @@ const (
 	defaultActiveFlowExportTimeout = 60 * time.Second
 	defaultIdleFlowExportTimeout   = 15 * time.Second
 	defaultNPLPortRange            = "40000-41000"
-	defaultAgentBindAddress		   = ":5036"
 	defaultAgentMetricsBindAddress = ":8036"
 	defaultAgentHealthzBindAddress = ":8037"
 )
@@ -105,9 +104,7 @@ func (o *Options) setDefaults() {
 	//if o.config.ServiceCIDR == "" {
 	//	o.config.ServiceCIDR = defaultServiceCIDR
 	//}
-	if o.config.BindAddress == "" {
-		o.config.BindAddress = defaultAgentBindAddress
-	}
+
 	if o.config.MetricsBindAddress == "" {
 		o.config.MetricsBindAddress = defaultAgentMetricsBindAddress
 	}

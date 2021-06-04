@@ -8,19 +8,24 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
+	"github.com/containernetworking/plugins/pkg/ip"
 	"google.golang.org/grpc"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
+	"net"
+	"projectkuryr/kuryr/pkg/agent/cniserver/ipam"
 	"projectkuryr/kuryr/pkg/agent/config"
 	"projectkuryr/kuryr/pkg/agent/interfacestore"
 	"projectkuryr/kuryr/pkg/agent/openflow"
 	"projectkuryr/kuryr/pkg/agent/route"
 	"projectkuryr/kuryr/pkg/agent/types"
 	"projectkuryr/kuryr/pkg/agent/util"
-	crdclientset "projectkuryr/kuryr/pkg/client/clientset/versioned"
-	cniv1alpha1 "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
 	cnipb "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
+	cniv1alpha1 "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
+	"projectkuryr/kuryr/pkg/apis/openstack/v1alpha1"
+	crdclientset "projectkuryr/kuryr/pkg/client/clientset/versioned"
+	kuryrinformers "projectkuryr/kuryr/pkg/client/informers/externalversions/openstack/v1alpha1"
+	kuryrlisters "projectkuryr/kuryr/pkg/client/listers/openstack/v1alpha1"
 	"strings"
 	"sync"
 
@@ -78,7 +83,8 @@ type CNIServer struct {
 	supportedCNIVersions map[string]bool
 	serverVersion        string
 	crdClient 			crdclientset.Interface
-
+	kpInformer 			kuryrinformers.KuryrPortInformer
+	kpLister 			kuryrlisters.KuryrPortLister
 	nodeConfig           *config.NodeConfig
 	hostProcPathPrefix   string
 	kubeClient           clientset.Interface
@@ -108,12 +114,12 @@ type NetworkConfig struct {
 	DeviceID   string          `json:"deviceID"` // PCI address of a VF
 	MTU        int             `json:"mtu,omitempty"`
 	DNS        cnitypes.DNS    `json:"dns"`
-	//IPAM       ipam.IPAMConfig `json:"ipam,omitempty"`
+	IPAM       ipam.IPAMConfig `json:"ipam,omitempty"`
 	// Options to be passed in by the runtime.
-	//RuntimeConfig RuntimeConfig `json:"runtimeConfig"`
+	RuntimeConfig RuntimeConfig `json:"runtimeConfig"`
 
-	//RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
-	//PrevResult    cnitypes.Result        `json:"-"`
+	RawPrevResult map[string]interface{} `json:"prevResult,omitempty"`
+	PrevResult    cnitypes.Result        `json:"-"`
 }
 
 type CNIConfig struct {
@@ -186,6 +192,115 @@ func (s *CNIServer) tryAgainLaterResponse() *cnipb.CniCmdResponse {
 	return s.generateCNIErrorResponse(cniErrorCode, cniErrorMsg)
 }
 
+// updateResultIfaceConfig processes the result from the IPAM plugin and does the following:
+//   * updates the IP configuration for each assigned IP address: this includes computing the
+//     gateway (if missing) based on the subnet and setting the interface pointer to the container
+//     interface
+//   * if there is no default route, add one using the provided default gateway
+func updateResultIfaceConfig(result *current.Result, defaultIPv4Gateway net.IP, defaultIPv6Gateway net.IP) {
+	for _, ipc := range result.IPs {
+		// result.Interfaces[0] is host interface, and result.Interfaces[1] is container interface
+		ipc.Interface = current.Int(1)
+		if ipc.Gateway == nil {
+			ipn := ipc.Address
+			netID := ipn.IP.Mask(ipn.Mask)
+			ipc.Gateway = ip.NextIP(netID)
+		}
+	}
+
+	foundV4DefaultRoute := false
+	foundV6DefaultRoute := false
+	defaultV4RouteDst := "0.0.0.0/0"
+	defaultV6RouteDst := "::/0"
+	if result.Routes != nil {
+		for _, rt := range result.Routes {
+			if rt.Dst.String() == defaultV4RouteDst {
+				foundV4DefaultRoute = true
+			} else if rt.Dst.String() == defaultV6RouteDst {
+				foundV6DefaultRoute = true
+			}
+		}
+	} else {
+		result.Routes = []*cnitypes.Route{}
+	}
+
+	if (!foundV4DefaultRoute) && (defaultIPv4Gateway != nil) {
+		_, defaultV4RouteDstNet, _ := net.ParseCIDR(defaultV4RouteDst)
+		result.Routes = append(result.Routes, &cnitypes.Route{Dst: *defaultV4RouteDstNet, GW: defaultIPv4Gateway})
+	}
+	if (!foundV6DefaultRoute) && (defaultIPv6Gateway != nil) {
+		_, defaultV6RouteDstNet, _ := net.ParseCIDR(defaultV6RouteDst)
+		result.Routes = append(result.Routes, &cnitypes.Route{Dst: *defaultV6RouteDstNet, GW: defaultIPv6Gateway})
+	}
+}
+
+func updateResultIfaceConfigFromKp(result *current.Result, kp *v1alpha1.KuryrPort) error {
+	var ipConfigs []*current.IPConfig
+	var ipRoutes []*cnitypes.Route
+
+	defaultV4RouteDst := "0.0.0.0/0"
+	defaultV6RouteDst := "::/0"
+
+	for _, vif := range kp.Status.Vifs {
+		subnets := vif.Vif.Network.Subnets
+		for _, subnet := range subnets {
+			ips := subnet.Ips
+			for _, ip := range ips {
+				gw := net.ParseIP(subnet.Gateway)
+				_, ipNet, err := net.ParseCIDR(subnet.Cidr)
+				if err != nil {
+					klog.Infof("ParseCIDR(%s) Error: %s", subnet.Cidr, err)
+					return err
+				}
+				cniRoute := &cnitypes.Route{
+					Dst: *ipNet,
+					GW:  gw,
+				}
+				ipRoutes = append(ipRoutes, cniRoute)
+
+				if vif.IsDefault {
+					var ipNetDft *net.IPNet
+					if subnet.IPVersion == 4 {
+						_, ipNetDft, err = net.ParseCIDR(defaultV4RouteDst)
+						if err != nil {
+							klog.Infof("ParseCIDR(%s) Error: %s", defaultV4RouteDst, err)
+							return err
+						}
+					}else{
+						_, ipNetDft, err = net.ParseCIDR(defaultV6RouteDst)
+						if err != nil {
+							klog.Infof("ParseCIDR(%s) Error: %s", defaultV6RouteDst, err)
+							return err
+						}
+					}
+
+					defaultRoute := &cnitypes.Route{
+						Dst: *ipNetDft,
+						GW:  gw,
+					}
+					ipRoutes = append(ipRoutes, defaultRoute)
+				}
+
+				ipConfig := current.IPConfig{
+					Version: string(subnet.IPVersion),
+					Address: net.IPNet{
+						IP: net.ParseIP(ip.IPAddress),
+						Mask: ipNet.Mask,
+					},
+					Gateway: net.ParseIP(subnet.Gateway),
+				}
+				ipConfigs = append(ipConfigs, &ipConfig)
+			}
+		}
+	}
+
+	result.IPs = ipConfigs
+	result.Routes = ipRoutes
+	klog.Infof("### result: %v", result)
+	return nil
+}
+
+
 // reconcile performs startup reconciliation for the CNI server. The CNI server is in charge of
 // installing Pod flows, so as part of this reconciliation process we retrieve the Pod list from the
 // K8s apiserver and replay the necessary flows.
@@ -195,15 +310,21 @@ func (s *CNIServer) reconcile() error {
 	// the watch cache in kube-apiserver.
 
 	return nil
-	pods, err := s.kubeClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
-		FieldSelector:   "spec.nodeName=" + s.nodeConfig.Name,
-		ResourceVersion: "0",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list Pods running on Node %s: %v", s.nodeConfig.Name, err)
-	}
+	//pods, err := s.kubeClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
+	//	FieldSelector:   "spec.nodeName=" + s.nodeConfig.Name,
+	//	ResourceVersion: "0",
+	//})
+	//if err != nil {
+	//	return fmt.Errorf("failed to list Pods running on Node %s: %v", s.nodeConfig.Name, err)
+	//}
+	//
+	//return s.podConfigurator.reconcile(pods.Items, s.containerAccess)
+}
 
-	return s.podConfigurator.reconcile(pods.Items, s.containerAccess)
+func (s *CNIServer) configInterfaceFailureResponse(err error) *cnipb.CniCmdResponse {
+	cniErrorCode := cnipb.ErrorCode_CONFIG_INTERFACE_FAILURE
+	cniErrorMsg := err.Error()
+	return s.generateCNIErrorResponse(cniErrorCode, cniErrorMsg)
 }
 
 func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*cnipb.CniCmdResponse, error) {
@@ -213,12 +334,17 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 		return response, nil
 	}
 
-	select {
-	case <-time.After(networkReadyTimeout):
-		klog.Errorf("Cannot process CmdAdd request for container %v because network is not ready", cniConfig.ContainerId)
-		return s.tryAgainLaterResponse(), nil
-	case <-s.networkReadyCh:
-	}
+	//select {
+	//case <-time.After(networkReadyTimeout):
+	//	klog.Errorf("Cannot process CmdAdd request for container %v because network is not ready", cniConfig.ContainerId)
+	//	return s.tryAgainLaterResponse(), nil
+	//case <-s.networkReadyCh:
+	//}
+
+	klog.Infof("\n\n\n\ncniConfig: %+v\n\n\n\n", cniConfig)
+
+	klog.Infof("cniConfig> K8S_POD_NAMESPACE: %v", string(cniConfig.K8S_POD_NAMESPACE))
+
 
 	cniVersion := cniConfig.CNIVersion
 	result := &current.Result{CNIVersion: cniVersion}
@@ -241,8 +367,43 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	}()
 
 	infraContainer := cniConfig.getInfraContainer()
-	s.containerAccess.lockContainer(infraContainer)
-	defer s.containerAccess.unlockContainer(infraContainer)
+	//s.containerAccess.lockContainer(infraContainer)
+	//defer s.containerAccess.unlockContainer(infraContainer)
+
+	klog.Infof("cniConfig> infraContainer: %v", infraContainer)
+
+	kp, err := s.kpInformer.Lister().KuryrPorts(string(cniConfig.K8S_POD_NAMESPACE)).Get(string(cniConfig.K8S_POD_NAME))
+	if err != nil {
+		klog.Errorf("Get KuryrPort(%s/%s) Error: %s", string(cniConfig.K8S_POD_NAMESPACE), string(cniConfig.K8S_POD_NAME), err)
+	}
+
+	err = updateResultIfaceConfigFromKp(result, kp)
+	if err != nil {
+		klog.Errorf("Invoke updateResultIfaceConfigFromKp(%s/%s) Error: %s", string(cniConfig.K8S_POD_NAMESPACE), string(cniConfig.K8S_POD_NAME), err)
+	}
+
+	updateResultIfaceConfig(result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
+	updateResultDNSConfig(result, cniConfig)
+
+	// Setup pod interfaces and connect to ovs bridge
+	podName := string(cniConfig.K8S_POD_NAME)
+	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
+
+	if err = s.podConfigurator.configureInterfaces(
+		podName,
+		podNamespace,
+		cniConfig.ContainerId,
+		netNS,
+		cniConfig.Ifname,
+		cniConfig.MTU,
+		cniConfig.DeviceID,
+		result,
+		isInfraContainer,
+		s.containerAccess,
+	); err != nil {
+		klog.Errorf("Failed to configure interfaces for container %s: %v", cniConfig.ContainerId, err)
+		return s.configInterfaceFailureResponse(err), nil
+	}
 
 	var resultBytes bytes.Buffer
 	_ = result.PrintTo(&resultBytes)
@@ -294,21 +455,38 @@ func buildVersionSet() map[string]bool {
 	return versionSet
 }
 
+func newContainerAccessArbitrator() *containerAccessArbitrator {
+	arbitrator := &containerAccessArbitrator{
+		busyContainerKeys: make(map[string]bool),
+	}
+	arbitrator.cond = sync.NewCond(&arbitrator.mutex)
+	return arbitrator
+}
+
 func New(
 	cniSocket, hostProcPathPrefix string,
 	crdClient crdclientset.Interface,
+	kpInformer kuryrinformers.KuryrPortInformer,
 	networkReadyCh <-chan struct{},
+	routeClient route.Interface,
+	nodeConfig *config.NodeConfig,
 ) *CNIServer {
 	return &CNIServer{
 		cniSocket:            cniSocket,
 		supportedCNIVersions: supportedCNIVersionSet,
 		serverVersion:        cni.KuryrCNIVersion,
+
 		crdClient: 			  crdClient,
-		networkReadyCh:       networkReadyCh,
+		kpLister: 				kpInformer.Lister(),
+		kpInformer: kpInformer,
 		hostProcPathPrefix: hostProcPathPrefix,
+
+		containerAccess:      newContainerAccessArbitrator(),
+		routeClient:          routeClient,
+		nodeConfig:           nodeConfig,
+		networkReadyCh:       networkReadyCh,
 	}
 }
-
 
 func (s *CNIServer) Initialize(
 	ovsBridgeClient ovsconfig.OVSBridgeClient,
@@ -316,6 +494,15 @@ func (s *CNIServer) Initialize(
 	ifaceStore interfacestore.InterfaceStore,
 	entityUpdates chan<- types.EntityReference,
 ) error {
+	var err error
+	s.podConfigurator, err = newPodConfigurator(
+		ovsBridgeClient, ofClient, s.routeClient, ifaceStore, s.nodeConfig.GatewayConfig.MAC,
+		ovsBridgeClient.GetOVSDatapathType(), ovsBridgeClient.IsHardwareOffloadEnabled(), entityUpdates,
+	)
+	if err != nil {
+		return fmt.Errorf("error during initialize podConfigurator: %v", err)
+	}
+
 	return nil
 }
 

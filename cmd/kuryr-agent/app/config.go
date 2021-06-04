@@ -9,9 +9,6 @@ type AgentConfig struct {
 	// to communicate with the apiserver.
 	ClientConnection componentbaseconfig.ClientConnectionConfiguration `yaml:"clientConnection"`
 
-	// bindAddress is the IP address for the proxy server to serve on,
-	// defaulting to 0.0.0.0:5036
-	BindAddress string `yaml:"bindAddress,omitempty""`
 	// healthzBindAddress is the IP address and port for the health check server to serve on,
 	// defaulting to 0.0.0.0:8088
 	HealthzBindAddress string `yaml:"healthzBindAddress,omitempty""`

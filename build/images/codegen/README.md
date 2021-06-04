@@ -18,6 +18,3 @@ docker build -t ${IMAGE_NAME} -f ./build/images/codegen/Dockerfile .
 docker push ${IMAGE_NAME}
 ```
 
-
-The `docker push` command will fail if you do not have permission to push to the
-`kuryr` Dockerhub repository.

@@ -1,20 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2019 Antrea Authors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-set -o errexit
+# set -o errexit
 set -o nounset
 set -o pipefail
 
@@ -23,7 +9,7 @@ set -o pipefail
 
 KURYR_ROOT=${GOPATH}/src/projectkuryr/kuryr
 CONTAINER_WORKDIR=/go/src/projectkuryr/kuryr
-IMAGE_NAME=registry-jinan-lab.inspurcloud.cn/library/cke/kuryr/codegen:kubernetes-1.18.4
+IMAGE_NAME=registry-jinan-lab.insprcloud.cn/library/cke/kuryr/codegen:kubernetes-1.18.4
 
 function docker_run() {
   docker pull ${IMAGE_NAME}
@@ -34,3 +20,8 @@ function docker_run() {
 }
 
 docker_run hack/update-codegen-dockerized.sh
+
+
+
+
+# mount 本地目录到容器中，编译完成文件在本地

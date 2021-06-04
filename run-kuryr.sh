@@ -19,7 +19,6 @@ initKubeConfig(){
   kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig set-context kuryr-controller@kubernetes --cluster=kubernetes --user=kuryr-controller
   kubectl config --kubeconfig=${conf_dir}/kuryr.kubeconfig use-context kuryr-controller@kubernetes
 
-
 cat >${conf_dir}/kuryr-controller.conf <<EOF
 # Required Configuration
 clientConnection:
@@ -43,7 +42,6 @@ openstack:
     ovsBridge : br-int
 EOF
 
-
 cat >${conf_dir}/kuryr-agent.conf <<EOF
 # Required Configuration
 clientConnection:
@@ -57,10 +55,43 @@ healthzBindAddress :
 # dockerMode = true
 # netnsProcDir = /host_proc
 EOF
-
-# 再生成kuryr-agent.conf
-
 }
+
+
+mock_kubelet_invoke_cni(){
+  echo "Namespace Name: $1"
+  export POD_NAMESPACE=$1
+  export POD_NAME=$(kubectl get pod -nljx | grep -v "NAME" |  awk '{print $1}')
+  export PAUSE_CID=$(docker ps |grep POD_$POD_NAME |awk '{print $1}')
+  export PAUSE_PID=`docker inspect $PAUSE_CID -f {{.State.Pid}}`
+  export PAUSE_ID=`docker inspect $PAUSE_CID -f {{.Id}}`
+  export K8S_POD_INFRA_CONTAINER_ID=$PAUSE_ID
+
+  echo ${PAUSE_ID}
+  echo ${PAUSE_PID}
+  echo ${K8S_POD_INFRA_CONTAINER_ID}
+  echo ${PAUSE_CID}
+
+cat <<EOF | sudo tee /etc/cni/net.d/10-kuryr.conf
+{
+  "cniVersion": "0.3.1",
+  "name": "kuryr",
+  "type": "kuryr-cni",
+  "kuryr_conf": "/etc/kuryr/xxx.conf",
+  "debug": true
+}
+EOF
+
+# echo '{"cniVersion": "0.3.1","name": "mynet","type": "macvlan","bridge": "cni0","isGateway": true,"ipMasq": true,"ipam": {"type": "host-local","subnet": "10.244.1.0/24","routes": [{ "dst": "0.0.0.0/0" }]}}' | sudo CNI_COMMAND=ADD CNI_NETNS=/var/run/netns/a CNI_PATH=./bin CNI_IFNAME=eth0 CNI_CONTAINERID=a CNI_VERSION=0.3.1 ./bin/bridge
+
+cat /etc/cni/net.d/10-kuryr.conf | sudo CNI_COMMAND=ADD CNI_NETNS="/proc/${PAUSE_PID}/ns/net" \
+  CNI_PATH=${conf_dir} \
+  CNI_IFNAME=eth1 \
+  CNI_CONTAINERID=${PAUSE_ID} \
+  CNI_ARGS="IgnoreUnknown=1;POD_NAMESPACE=${POD_NAMESPACE};POD_NAME=${POD_NAME};K8S_POD_INFRA_CONTAINER_ID=${PAUSE_ID}"  ${conf_dir}/kuryr-cni
+}
+
+echo =========
 
 if [ "$1" = "init" ];then
   if [ "" == "$2" ];then
@@ -72,20 +103,34 @@ if [ "$1" = "init" ];then
     initKubeConfig
   fi
 elif [ "$1" = "agent" ];then
-  echo "run kuryr-agent!"
+  echo "build & run kuryr-agent!"
   go build -o ${conf_dir}/kuryr-agent ./cmd/kuryr-agent
   if [ $? -ne 0 ]; then
     exit 1
   fi
   ${conf_dir}/kuryr-agent --config ${conf_dir}/kuryr-agent.conf
+elif [ "$1" = "cni" ];then
+  ComponentName=$1
+  echo "build ${ComponentName}!"
+  go build -o ${conf_dir}/kuryr-${ComponentName} ./cmd/kuryr-${ComponentName}
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
+
+  mock_kubelet_invoke_cni "ljx"
+
 else
-  echo "run kuryr-controller!"
+  echo "build & run kuryr-controller!"
   go build -o ${conf_dir}/kuryr-controller ./cmd/kuryr-controller
   if [ $? -ne 0 ]; then
     exit 1
   fi
   ${conf_dir}/kuryr-controller --config ${conf_dir}/kuryr-controller.conf
 fi
+
+
+
+
 
 
 

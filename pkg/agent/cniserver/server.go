@@ -21,6 +21,7 @@ import (
 	crdclientset "projectkuryr/kuryr/pkg/client/clientset/versioned"
 	cniv1alpha1 "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
 	cnipb "projectkuryr/kuryr/pkg/apis/cni/v1alpha1"
+	"strings"
 	"sync"
 
 	"projectkuryr/kuryr/pkg/cni"
@@ -285,6 +286,14 @@ func (s *CNIServer) CmdCheck(_ context.Context, request *cnipb.CniCmdRequest) (
 	return &cnipb.CniCmdResponse{CniResult: []byte("")}, nil
 }
 
+func buildVersionSet() map[string]bool {
+	versionSet := make(map[string]bool)
+	for _, ver := range version.All.SupportedVersions() {
+		versionSet[strings.Trim(ver, " ")] = true
+	}
+	return versionSet
+}
+
 func New(
 	cniSocket, hostProcPathPrefix string,
 	crdClient crdclientset.Interface,
@@ -299,6 +308,7 @@ func New(
 		hostProcPathPrefix: hostProcPathPrefix,
 	}
 }
+
 
 func (s *CNIServer) Initialize(
 	ovsBridgeClient ovsconfig.OVSBridgeClient,
@@ -328,3 +338,8 @@ func (s *CNIServer) Run(stopCh <-chan struct{}) {
 	}()
 	<-stopCh
 }
+
+func init() {
+	supportedCNIVersionSet = buildVersionSet()
+}
+

@@ -14,7 +14,6 @@ import (
 	"k8s.io/klog"
 	"net/http"
 	"projectkuryr/kuryr/pkg/agent/cniserver"
-	"projectkuryr/kuryr/pkg/agent/interfacestore"
 	"projectkuryr/kuryr/pkg/agent/openflow"
 	ofconfig "projectkuryr/kuryr/pkg/ovs/openflow"
 	kuryrinformers "projectkuryr/kuryr/pkg/client/informers/externalversions"
@@ -23,7 +22,6 @@ import (
 	"projectkuryr/kuryr/pkg/ovs/ovsconfig"
 	"projectkuryr/kuryr/pkg/signals"
 	"projectkuryr/kuryr/pkg/version"
-	"projectkuryr/kuryr/pkg/agent/types"
 	"time"
 )
 

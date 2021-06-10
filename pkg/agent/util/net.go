@@ -76,6 +76,10 @@ func GenerateContainerInterfaceName(podName, podNamespace, containerID string) s
 	return generateInterfaceName(containerID, podName, true)
 }
 
+func GenerateTapInterfaceName(portId string) string {
+	return fmt.Sprintf("tap%s", portId[:12])
+}
+
 // GenerateNodeTunnelInterfaceName generates a unique interface name for the
 // tunnel to the Node, using the Node's name.
 func GenerateNodeTunnelInterfaceName(nodeName string) string {

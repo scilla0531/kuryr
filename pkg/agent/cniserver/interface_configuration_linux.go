@@ -96,6 +96,58 @@ func (ic *ifConfigurator) configureContainerLinkSriov(
 	return nil
 }
 
+func (ic *ifConfigurator) configureContainerTapLinkVeth(
+	containerID string,
+	hostIfaceName string,
+	containerNetNS string,
+	containerIfaceName string,
+	mtu int,
+	mac string,
+	result *current.Result,
+) error {
+	if err := ns.WithNetNSPath(containerNetNS, func(hostNS ns.NetNS) error {
+		klog.V(2).Infof("Creating veth devices (%s, %s) for container %s", containerIfaceName, hostIfaceName, containerID)
+
+		ip.DelLinkByName(containerIfaceName)
+		_, containerVeth, err := ip.SetupVethWithName(containerIfaceName, hostIfaceName, mtu, hostNS)
+		if err != nil {
+			return fmt.Errorf("failed to create veth devices for container %s: %v", containerID, err)
+		}
+
+		iface, err := netlink.LinkByName(containerIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup %q: %v", containerIfaceName, err)
+		}
+		var hardaddr net.HardwareAddr
+		hardaddr, err  = net.ParseMAC(mac)
+		if err != nil {
+			return fmt.Errorf("failed to ParseMAC: %v, error: %s\n", mac, err)
+		}
+
+		if err = netlink.LinkSetHardwareAddr(iface, hardaddr); err != nil {
+			return fmt.Errorf("failed to add hardware addr to %q: %v", containerIfaceName, err)
+		}
+
+		// OVS netdev datapath doesn't support TX checksum offloading, i.e. if packet
+		// arrives with bad/no checksum it will be sent to the output port with same bad/no checksum.
+		if ic.ovsDatapathType == ovsconfig.OVSDatapathNetdev {
+			if err := ethtool.EthtoolTXHWCsumOff(containerVeth.Name); err != nil {
+				return fmt.Errorf("error when disabling TX checksum offload on container veth: %v", err)
+			}
+		}
+
+		klog.V(2).Infof("Configuring IP address for container %s", containerID)
+		// result.Interfaces must be set before this.
+		if err := ipam.ConfigureIface(containerIfaceName, result); err != nil {
+			return fmt.Errorf("failed to configure IP address for container %s: %v", containerID, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 // configureContainerLinkVeth creates a veth pair: one in the container netns and one in the host netns, and configures IP
 // address and routes to the container veth.
 func (ic *ifConfigurator) configureContainerLinkVeth(

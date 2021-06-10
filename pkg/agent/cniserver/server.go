@@ -90,6 +90,7 @@ type CNIServer struct {
 	kubeClient           clientset.Interface
 	containerAccess      *containerAccessArbitrator
 	podConfigurator      *podConfigurator
+	kpConfigurator      *kpConfigurator
 	isChaining           bool
 	routeClient          route.Interface
 	//networkReadyCh notifies that the network is ready so new Pods can be created. Therefore, CmdAdd waits for it.
@@ -234,72 +235,64 @@ func updateResultIfaceConfig(result *current.Result, defaultIPv4Gateway net.IP, 
 	}
 }
 
-func updateResultIfaceConfigFromKp(result *current.Result, kp *v1alpha1.KuryrPort) error {
-	var ipConfigs []*current.IPConfig
-	var ipRoutes []*cnitypes.Route
-
+func updateResultIfaceConfigFromVif(result *current.Result, vif *v1alpha1.KuryrVif) error {
 	defaultV4RouteDst := "0.0.0.0/0"
 	defaultV6RouteDst := "::/0"
 
-	for _, vif := range kp.Status.Vifs {
-		subnets := vif.Vif.Network.Subnets
-		for _, subnet := range subnets {
-			ips := subnet.Ips
-			for _, ip := range ips {
-				gw := net.ParseIP(subnet.Gateway)
-				_, ipNet, err := net.ParseCIDR(subnet.Cidr)
-				if err != nil {
-					klog.Infof("ParseCIDR(%s) Error: %s", subnet.Cidr, err)
-					return err
+	for _, subnet := range vif.Vif.Network.Subnets {
+		ips := subnet.Ips
+		for idx, ip := range ips {
+			gw := net.ParseIP(subnet.Gateway)
+			_, ipNet, err := net.ParseCIDR(subnet.Cidr)
+			if err != nil {
+				klog.Infof("ParseCIDR(%s) Error: %s", subnet.Cidr, err)
+				return err
+			}
+			cniRoute := &cnitypes.Route{
+				Dst: *ipNet,
+				GW:  gw,
+			}
+			klog.Infof("cniRoute>: %v, idx: %d\n", cniRoute, idx)
+			//ipRoutes = append(ipRoutes, cniRoute)
+
+			if vif.IsDefault {
+				var ipNetDft *net.IPNet
+				if subnet.IPVersion == 4 {
+					_, ipNetDft, err = net.ParseCIDR(defaultV4RouteDst)
+					if err != nil {
+						klog.Infof("ParseCIDR(%s) Error: %s", defaultV4RouteDst, err)
+						return err
+					}
+				}else{
+					_, ipNetDft, err = net.ParseCIDR(defaultV6RouteDst)
+					if err != nil {
+						klog.Infof("ParseCIDR(%s) Error: %s", defaultV6RouteDst, err)
+						return err
+					}
 				}
-				cniRoute := &cnitypes.Route{
-					Dst: *ipNet,
+
+				defaultRoute := &cnitypes.Route{
+					Dst: *ipNetDft,
 					GW:  gw,
 				}
-				ipRoutes = append(ipRoutes, cniRoute)
-
-				if vif.IsDefault {
-					var ipNetDft *net.IPNet
-					if subnet.IPVersion == 4 {
-						_, ipNetDft, err = net.ParseCIDR(defaultV4RouteDst)
-						if err != nil {
-							klog.Infof("ParseCIDR(%s) Error: %s", defaultV4RouteDst, err)
-							return err
-						}
-					}else{
-						_, ipNetDft, err = net.ParseCIDR(defaultV6RouteDst)
-						if err != nil {
-							klog.Infof("ParseCIDR(%s) Error: %s", defaultV6RouteDst, err)
-							return err
-						}
-					}
-
-					defaultRoute := &cnitypes.Route{
-						Dst: *ipNetDft,
-						GW:  gw,
-					}
-					ipRoutes = append(ipRoutes, defaultRoute)
-				}
-
-				ipConfig := current.IPConfig{
-					Version: string(subnet.IPVersion),
-					Address: net.IPNet{
-						IP: net.ParseIP(ip.IPAddress),
-						Mask: ipNet.Mask,
-					},
-					Gateway: net.ParseIP(subnet.Gateway),
-				}
-				ipConfigs = append(ipConfigs, &ipConfig)
+				result.Routes = append(result.Routes, defaultRoute)
 			}
+			index := 1
+			ipConfig := current.IPConfig{
+				Version: fmt.Sprintf("%d", subnet.IPVersion),
+				Interface: &index, //
+				Address: net.IPNet{
+					IP: net.ParseIP(ip.IPAddress),
+					Mask: ipNet.Mask,
+				},
+				//Gateway: net.ParseIP(subnet.Gateway),
+			}
+			result.IPs = append(result.IPs, &ipConfig)
 		}
 	}
 
-	result.IPs = ipConfigs
-	result.Routes = ipRoutes
-	klog.Infof("### result: %v", result)
 	return nil
 }
-
 
 // reconcile performs startup reconciliation for the CNI server. The CNI server is in charge of
 // installing Pod flows, so as part of this reconciliation process we retrieve the Pod list from the
@@ -334,22 +327,14 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 		return response, nil
 	}
 
-	//select {
-	//case <-time.After(networkReadyTimeout):
-	//	klog.Errorf("Cannot process CmdAdd request for container %v because network is not ready", cniConfig.ContainerId)
-	//	return s.tryAgainLaterResponse(), nil
-	//case <-s.networkReadyCh:
-	//}
+	klog.Infof("\ncniConfig>: %+v\n\n", cniConfig)
 
-	klog.Infof("\n\n\n\ncniConfig: %+v\n\n\n\n", cniConfig)
-
-	klog.Infof("cniConfig> K8S_POD_NAMESPACE: %v", string(cniConfig.K8S_POD_NAMESPACE))
-
-
-	cniVersion := cniConfig.CNIVersion
-	result := &current.Result{CNIVersion: cniVersion}
 	netNS := s.hostNetNsPath(cniConfig.Netns)
 	isInfraContainer := isInfraContainer(netNS)
+	cniVersion := cniConfig.CNIVersion
+	// Setup pod interfaces and connect to ovs bridge
+	//podName := string(cniConfig.K8S_POD_NAME)
+	//podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
 
 	success := false
 	defer func() {
@@ -370,40 +355,48 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	//s.containerAccess.lockContainer(infraContainer)
 	//defer s.containerAccess.unlockContainer(infraContainer)
 
-	klog.Infof("cniConfig> infraContainer: %v", infraContainer)
+	klog.Infof("CmdAdd:> infraContainer: %s\n", infraContainer[:12])
 
 	kp, err := s.kpInformer.Lister().KuryrPorts(string(cniConfig.K8S_POD_NAMESPACE)).Get(string(cniConfig.K8S_POD_NAME))
 	if err != nil {
 		klog.Errorf("Get KuryrPort(%s/%s) Error: %s", string(cniConfig.K8S_POD_NAMESPACE), string(cniConfig.K8S_POD_NAME), err)
 	}
 
-	err = updateResultIfaceConfigFromKp(result, kp)
-	if err != nil {
-		klog.Errorf("Invoke updateResultIfaceConfigFromKp(%s/%s) Error: %s", string(cniConfig.K8S_POD_NAMESPACE), string(cniConfig.K8S_POD_NAME), err)
+	result := &current.Result{CNIVersion: cniVersion}
+//  多张网卡的处理逻辑不清晰
+	for _, vif := range kp.Status.Vifs {
+		if vif.IfName != cniConfig.Ifname { // 一次只处理一张网卡，网卡上可以有多个ip
+			continue
+		}
+		err = updateResultIfaceConfigFromVif(result, &vif)
+		if err != nil {
+			klog.Errorf("Invoke updateResultIfaceConfigFromVif(%s/%s) Error: %s", string(cniConfig.K8S_POD_NAMESPACE), string(cniConfig.K8S_POD_NAME), err)
+		}
+
+		hostIfaceName := util.GenerateTapInterfaceName(vif.Vif.ID)
+		hostIface := &current.Interface{Name: hostIfaceName, Mac: vif.Vif.MACAddress}
+		containerIface := &current.Interface{Name: cniConfig.Ifname, Sandbox: netNS, Mac: vif.Vif.MACAddress}
+		result.Interfaces = []*current.Interface{hostIface, containerIface}
+
+		klog.Infof("resultInner>: %+v\n\n", result)
+
+		if err = s.kpConfigurator.configureTap(
+			cniConfig.ContainerId,
+			hostIfaceName,
+			netNS,
+			cniConfig.Ifname,
+			vif.Vif.Network.MTU,
+			vif.Vif.MACAddress,
+			result,
+			isInfraContainer,
+			s.containerAccess,
+		); err != nil {
+			klog.Errorf("Failed to configure interfaces for container %s: %v", cniConfig.ContainerId, err)
+			return s.configInterfaceFailureResponse(err), nil
+		}
 	}
-
-	updateResultIfaceConfig(result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
-	updateResultDNSConfig(result, cniConfig)
-
-	// Setup pod interfaces and connect to ovs bridge
-	podName := string(cniConfig.K8S_POD_NAME)
-	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
-
-	if err = s.podConfigurator.configureInterfaces(
-		podName,
-		podNamespace,
-		cniConfig.ContainerId,
-		netNS,
-		cniConfig.Ifname,
-		cniConfig.MTU,
-		cniConfig.DeviceID,
-		result,
-		isInfraContainer,
-		s.containerAccess,
-	); err != nil {
-		klog.Errorf("Failed to configure interfaces for container %s: %v", cniConfig.ContainerId, err)
-		return s.configInterfaceFailureResponse(err), nil
-	}
+	//updateResultIfaceConfig(result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
+	//updateResultDNSConfig(result, cniConfig)
 
 	var resultBytes bytes.Buffer
 	_ = result.PrintTo(&resultBytes)
@@ -461,6 +454,10 @@ func newContainerAccessArbitrator() *containerAccessArbitrator {
 	}
 	arbitrator.cond = sync.NewCond(&arbitrator.mutex)
 	return arbitrator
+}
+
+func init() {
+	supportedCNIVersionSet = buildVersionSet()
 }
 
 func New(
@@ -526,7 +523,20 @@ func (s *CNIServer) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
-func init() {
-	supportedCNIVersionSet = buildVersionSet()
+func (s *CNIServer) InitializeCniServer(
+	ovsBridgeClient ovsconfig.OVSBridgeClient,
+) error {
+	var err error
+	s.kpConfigurator, err = newKpConfigurator(
+		ovsBridgeClient,
+		ovsBridgeClient.GetOVSDatapathType(),
+		ovsBridgeClient.IsHardwareOffloadEnabled(),
+	)
+	if err != nil {
+		return fmt.Errorf("error during initialize kpConfigurator: %v", err)
+	}
+
+	return nil
 }
+
 

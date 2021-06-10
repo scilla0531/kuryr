@@ -9,12 +9,7 @@ import (
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/mux"
 	"k8s.io/apiserver/pkg/server/routes"
-	"net"
-	"projectkuryr/kuryr/pkg/agent"
-	"projectkuryr/kuryr/pkg/agent/config"
 	"projectkuryr/kuryr/pkg/agent/interfacestore"
-	"projectkuryr/kuryr/pkg/agent/route"
-	"projectkuryr/kuryr/pkg/agent/types"
 
 	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/klog"
@@ -119,7 +114,7 @@ func run(o *Options) error {
 	klog.Infof("Starting Kuryr agent (version %s)", version.GetFullVersion())
 	// Create K8s Clientset, CRD Clientset and SharedInformerFactory for the given config.
 	//k8sClient, _, crdClient, err := k8s.CreateClients(o.config.ClientConnection, o.config.KubeAPIServerOverride)
-	k8sClient, _, crdClient, err := k8s.CreateClientsCrd(o.config.ClientConnection, "")
+	_, _, crdClient, err := k8s.CreateClientsCrd(o.config.ClientConnection, "")
 	if err != nil {
 		return fmt.Errorf("error creating k8s clients: %v", err)
 	}
@@ -134,7 +129,8 @@ func run(o *Options) error {
 	klog.Infof("GetContainerInterfaceNum: %+v\n", ifaceStore.GetContainerInterfaceNum())
 
 	// Create ovsdb and openflow clients.
-	ovsdbAddress := ovsconfig.GetConnAddress(o.config.OVSRunDir)
+
+	ovsdbAddress := ovsconfig.GetConnAddress(o.config.OVSRunDir) // default is /var/run/openvswitch/db.sock
 	ovsdbConnection, err := ovsconfig.NewOVSDBConnectionUDS(ovsdbAddress)
 	if err != nil {
 		// TODO: ovsconfig.NewOVSDBConnectionUDS might return timeout in the future, need to add retry
@@ -143,9 +139,6 @@ func run(o *Options) error {
 	defer ovsdbConnection.Close()
 
 	ovsDatapathType := ovsconfig.OVSDatapathType(o.config.OVSDatapathType)
-	klog.Infof("<config>: ovsDatapathType : %+v\n", ovsDatapathType)
-	klog.Infof("<config>: OVSRunDir : %v, OVSBridge : %v\n", o.config.OVSRunDir, o.config.OVSBridge)
-
 	ovsBridgeClient := ovsconfig.NewOVSBridge(o.config.OVSBridge, ovsDatapathType, ovsdbConnection)
 	klog.Infof("<ovsBridgeClient>: %+v\n", *ovsBridgeClient)
 
@@ -153,13 +146,12 @@ func run(o *Options) error {
 	if err != nil {
 		klog.Infof("GetPortList Error: %s\n", err)
 	}
-	for _, ovsport := range ovsPorts {
-		klog.Infof("ovsPort: %+v\n", ovsport)
+	for _, ovsPort := range ovsPorts {
+		klog.Infof("<ovsPort>: %+v\n", ovsPort)
 	}
 
 	ovsBridgeMgmtAddr := ofconfig.GetMgmtAddress(o.config.OVSRunDir, o.config.OVSBridge)
 	klog.Infof("<config>: ovsBridgeMgmtAddr : %+v\n", ovsBridgeMgmtAddr)
-
 	ofClient := openflow.NewClient(o.config.OVSBridge, ovsBridgeMgmtAddr, ovsDatapathType,
 		false,
 		false,
@@ -170,60 +162,16 @@ func run(o *Options) error {
 		klog.Infof("ofport: %+v\n", ofport)
 	}
 
-	_, serviceCIDRNet, _ := net.ParseCIDR(o.config.ServiceCIDR)
-	var serviceCIDRNetv6 *net.IPNet
-	// Todo: use FeatureGate to check if IPv6 is enabled and then read configuration item "ServiceCIDRv6".
-	if o.config.ServiceCIDRv6 != "" {
-		_, serviceCIDRNetv6, _ = net.ParseCIDR(o.config.ServiceCIDRv6)
-	}
-
-	_, encapMode := config.GetTrafficEncapModeFromStr(o.config.TrafficEncapMode)
-	networkConfig := &config.NetworkConfig{
-		TunnelType:        ovsconfig.TunnelType(o.config.TunnelType),
-		TrafficEncapMode:  encapMode,
-		EnableIPSecTunnel: o.config.EnableIPSecTunnel}
-
-	routeClient, err := route.NewClient(serviceCIDRNet, networkConfig, o.config.NoSNAT)
-	if err != nil {
-		return fmt.Errorf("error creating route client: %v", err)
-	}
-
-	// networkReadyCh is used to notify that the Node's network is ready.
-	// Functions that rely on the Node's network should wait for the channel to close.
-	networkReadyCh := make(chan struct{})
-	entityUpdates := make(chan types.EntityReference, 100)
-
-	// Initialize agent and node network.
-	agentInitializer := agent.NewInitializer(
-		k8sClient,
-		ovsBridgeClient,
-		ofClient,
-		routeClient,
-		ifaceStore,
-		o.config.OVSBridge,
-		o.config.HostGateway,
-		o.config.DefaultMTU,
-		serviceCIDRNet,
-		serviceCIDRNetv6,
-		networkConfig,
-		networkReadyCh,
-		false)
-	err = agentInitializer.Initialize()
-	if err != nil {
-		return fmt.Errorf("error initializing agent: %v", err)
-	}
-	nodeConfig := agentInitializer.GetNodeConfig()
-
 	cniServer := cniserver.New(
 		o.config.CNISocket,
 		o.config.HostProcPathPrefix,
 		crdClient,
 		kpInformer,
-		networkReadyCh,
-		routeClient,
-		nodeConfig)
+		nil,
+		nil,
+		nil)
 
-	err = cniServer.Initialize(ovsBridgeClient, ofClient, ifaceStore, entityUpdates)
+	err = cniServer.InitializeCniServer(ovsBridgeClient)
 	if err != nil {
 		return fmt.Errorf("error initializing CNI server: %v", err)
 	}

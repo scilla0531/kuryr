@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
+	"github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
 	"github.com/spf13/pflag"
 	"k8s.io/api/apps/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -365,6 +366,13 @@ func OsNetworkIndexFunc(obj interface{}) ([]string, error){
 	return []string{ net.TenantID}, nil
 }
 
+/*第二层key*/
+func OsSubnetIndexFunc(obj interface{}) ([]string, error){
+	subnet := obj.(*subnets.Subnet)
+	klog.Infof("OsNetworkIndexFunc > TenantID: %v\n", subnet.TenantID)
+	return []string{ subnet.TenantID}, nil
+}
+
 /*第三层key*/
 func OsNetworkKeyFunc(obj interface{}) (string, error) {
 	if key, ok := obj.(string); ok {
@@ -393,17 +401,19 @@ func SplitUserKeyFunc(key string) (kind, name string, err error) {
 
 func LearnIndexer(){
 	if true {
-		IndexName := "OsNetwork"
+		IndexNameOsNetwork := "OsNetwork"
 		tenantId := "tenantid-xxx"
 		netId1 := "networkid-111"
 		netId2 := "networkid-222"
 
-		osIndex := cache.NewIndexer(OsNetworkKeyFunc/*用于计算资源对象的key(第三层key)*/, cache.Indexers{IndexName/*索引器的名称（第一层key）*/: OsNetworkIndexFunc/*第二层key*/})
+		osIndex := cache.NewIndexer(OsNetworkKeyFunc/*用于计算资源对象的key(第三层key)*/, cache.Indexers{
+			IndexNameOsNetwork/*索引器的名称（第一层key）*/: OsNetworkIndexFunc/*第二层key*/,
+			"OsSubnet": OsSubnetIndexFunc})
 		osIndex.Add(&networks.Network{ID: netId1, TenantID: tenantId})
 		osIndex.Add(&networks.Network{ID: netId2, TenantID: tenantId})
 		klog.Infof("#####ListKeys: %+v \n\n", osIndex.ListKeys()) // 罗列的是所有items的key
 
-		nets, err := osIndex.ByIndex(IndexName, tenantId)
+		nets, err := osIndex.ByIndex(IndexNameOsNetwork, tenantId)
 		if err != nil {
 			klog.Errorf("Error: %s", err)
 		}
@@ -411,7 +421,7 @@ func LearnIndexer(){
 			klog.Infof("get OsNetwork : %v\n", net.(*networks.Network))
 		}
 
-		nets, err = osIndex.ByIndex(IndexName, netId1)
+		nets, err = osIndex.ByIndex(IndexNameOsNetwork, netId1)
 		if err != nil {
 			klog.Errorf("Error: %s", err)
 		}
@@ -435,4 +445,5 @@ func LearnClientGo(config *ControllerConfig) {
 	learnDynamicClient(config.ClientConnection)
 	learnClientSet(config.ClientConnection)
 	learnInformer(config.ClientConnection)
+
 }

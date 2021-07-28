@@ -133,7 +133,6 @@ func (o *Options) validate(args []string) error {
 	}
 
 	// 检查 o.config.HealthzBindAddress 和 o.config.MetricsBindAddress 是否符合ipPort
-
 	return nil
 }
 

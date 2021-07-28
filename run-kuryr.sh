@@ -92,7 +92,7 @@ echo ""
 if [ "$1" = "init" ];then
   if [ "" == "$2" ];then
     echo "Need <openrcFile>"
-    exit 1
+    return 100
   else
     source $2
     echo "Initialize kubeconfig!"
@@ -102,7 +102,7 @@ elif [ "$1" = "agent" ];then
   echo "build & run kuryr-agent!"
   go build -o ${conf_dir}/kuryr-agent ./cmd/kuryr-agent
   if [ $? -ne 0 ]; then
-    exit 1
+    return 100
   fi
   ${conf_dir}/kuryr-agent --config ${conf_dir}/kuryr-agent.conf
 elif [ "$1" = "cni" ];then
@@ -110,14 +110,14 @@ elif [ "$1" = "cni" ];then
   echo "build ${ComponentName}!"
   go build -o ${conf_dir}/kuryr-${ComponentName} ./cmd/kuryr-${ComponentName}
   if [ $? -ne 0 ]; then
-    exit 1
+    return 100
   fi
   mock_kubelet_invoke_cni "ljx"
 else
   echo "build & run kuryr-controller!"
   go build -o ${conf_dir}/kuryr-controller ./cmd/kuryr-controller
   if [ $? -ne 0 ]; then
-    exit 1
+    return 100
   fi
   ${conf_dir}/kuryr-controller --config ${conf_dir}/kuryr-controller.conf
 fi

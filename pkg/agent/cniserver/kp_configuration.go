@@ -4,6 +4,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/klog"
 	"net"
+	"os/exec"
 	"projectkuryr/kuryr/pkg/ovs/ovsconfig"
 )
 
@@ -28,7 +29,20 @@ func newKpConfigurator(
 	}, nil
 }
 
+func createOvsVifCmd(bridge, dev, ifaceId, mac, instanceId string) []string{
+	// ovs-vsctl -- --if-exists del-port $tapname -- add-port br-int $tapname -- set Interface $tapname external-ids:iface-id=$neutron_port external-ids:iface-status=active external-ids:attached-mac=$port_mac external-ids:vm-uuid=kuryr
+	cmd := []string{"--", "--if-exists", "del-port", dev, "--",
+		"add-port", bridge, dev,
+		"--", "set", "Interface", dev,
+		"external-ids:iface-id=" + ifaceId,
+		"external-ids:iface-status=active",
+		"external-ids:attached-mac=" + mac,
+		"external-ids:vm-uuid=" + instanceId}
+	return cmd
+}
+
 func (kc *kpConfigurator) configureTap(
+	portId string,
 	containerID string,
 	hostIfaceName string,
 	containerNetNS string,
@@ -48,6 +62,33 @@ func (kc *kpConfigurator) configureTap(
 	if !createOVSPort {
 		return nil
 	}
+
+	hostIface := result.Interfaces[0]
+	//containerIface := result.Interfaces[1]
+
+	// Delete veth pair if any failure occurs in later manipulation.
+	success := false
+	defer func() {
+		if !success {
+			_ = kc.ifConfigurator.removeContainerLink(containerID, hostIface.Name)
+		}
+	}()
+
+	cmdArgs := createOvsVifCmd("br-int", hostIfaceName, portId, mac, "kuryr")
+	cmd := exec.Command("ovs-vsctl", cmdArgs...)
+	err = cmd.Run()
+	if err != nil {
+		klog.Error(err)
+	}else{
+		success = true
+	}
+
+	defer func() {
+		if !success {
+			klog.Error("rollback ..........")
+		}
+	}()
+
 	return nil
 }
 
@@ -74,39 +115,7 @@ func (kc *kpConfigurator) configureInterfaces(
 		return nil
 	}
 
-	/*
-	hostIface := result.Interfaces[0]
-	containerIface := result.Interfaces[1]
 
-	// Delete veth pair if any failure occurs in later manipulation.
-	success := false
-	defer func() {
-		if !success {
-			_ = kc.ifConfigurator.removeContainerLink(containerID, hostIface.Name)
-		}
-	}()
-
-	// ovs-vsctl -- --if-exists del-port $tapname -- add-port br-int $tapname -- set Interface $tapname external-ids:iface-id=$neutron_port external-ids:iface-status=active external-ids:attached-mac=$port_mac external-ids:vm-uuid=kuryr
-	var containerConfig *interfacestore.InterfaceConfig
-	if containerConfig, err = kc.connectInterfaceToOVS(podName, podNameSpace, containerID, hostIface, containerIface, result.IPs, containerAccess); err != nil {
-		return fmt.Errorf("failed to connect to ovs for container %s: %v", containerID, err)
-	} else {
-		success = true
-	}
-	defer func() {
-		if !success {
-			_ = kc.disconnectInterfaceFromOVS(containerConfig)
-		}
-	}()
-
-	// Note that the IP address should be advertised after Pod OpenFlow entries are installed, otherwise the packet might
-	// be dropped by OVS.
-	if err = kc.ifConfigurator.advertiseContainerAddr(containerNetNS, containerIface.Name, result); err != nil {
-		klog.Errorf("Failed to advertise IP address for container %s: %v", containerID, err)
-	}
-	// Mark the manipulation as success to cancel deferred operations.
-	success = true
-	*/
 	klog.Infof("Configured interfaces for container %s", containerID)
 
 	return nil

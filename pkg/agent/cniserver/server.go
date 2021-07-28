@@ -381,6 +381,7 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 		klog.Infof("resultInner>: %+v\n\n", result)
 
 		if err = s.kpConfigurator.configureTap(
+			vif.Vif.ID,
 			cniConfig.ContainerId,
 			hostIfaceName,
 			netNS,
